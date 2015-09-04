@@ -1,0 +1,10 @@
+*
+!*.*
+!*/
+!Makefile
+
+# Intermediary files
+*.i
+*.s
+*.bin
+*.lst
