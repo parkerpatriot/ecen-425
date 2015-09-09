@@ -14,6 +14,7 @@ AsmFunction:
 	; [bp+12] -> e
 	push bp
 	mov bp, sp
+	push bx
 	; (b+c)
 	mov	ax, [bp+6]
 	add ax, [bp+8]
@@ -32,6 +33,7 @@ AsmFunction:
 	; gvar+(a*(b+c))/(d-e)
 	add ax, [gvar]
 	; reset the stack
+	pop bx
 	mov sp, bp
 	pop bp
 	ret
