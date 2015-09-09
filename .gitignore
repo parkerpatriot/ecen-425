@@ -2,6 +2,7 @@
 !*.*
 !*/
 !Makefile
+wiki
 
 # Intermediary files
 *.i
