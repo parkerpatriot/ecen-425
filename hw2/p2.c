@@ -54,7 +54,5 @@ int main() {
     printf("Second local array:\n");
     print_array(local_no_touch, 10);
 
-
-
     return 0;
 }

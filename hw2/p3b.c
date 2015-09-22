@@ -2,13 +2,15 @@
 #include "stdint.h"
 
 
+#include "stdio.h"
+#include "stdint.h"
+
 int main(){
 
-	int * int_ptr;
-	int my_int;
-	my_int = 3;
-	*int_ptr = my_int;
-	printf("hello world\n");
+	char char_ptr[100];
+	int a, b, c;
+
+	printf("%s, %d, %d", a, b, c);
 
 	return 0;
 }
