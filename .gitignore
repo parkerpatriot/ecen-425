@@ -6,7 +6,6 @@ wiki
 
 # Intermediary files
 *.i
-*.s
 *.bin
 *.lst
 *.txt
