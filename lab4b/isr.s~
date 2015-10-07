@@ -43,7 +43,7 @@ isr_tick:
 	call	YKEnterISR
 	;sti tick should never be interrupted
 	call	YKTickHandler
-	;cli
+	cli
 	mov	al, 0x20
 	out	0x20, al
 	call	YKExitISR	

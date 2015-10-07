@@ -10,9 +10,10 @@ extern int KeyBuffer;
 int YKtaskCount;
 int YKRunFlag;
 int YKIsrDepth;
-int YKTickCount;
-int YKCtxSwCount;
-int YKIdleCount;
+volatile int YKIdleVar;
+unsigned int YKTickCount;
+unsigned int YKCtxSwCount;
+unsigned int YKIdleCount;
 
 struct Task* readyHead;
 struct Task* readyTail;
@@ -31,7 +32,12 @@ struct Task {
 int YKIdleStk[STACKSIZE];
 
 void YKIdleTask(void){
-	while(1);
+	while(1){
+		YKIdleCount++;
+		if(YKIdleVar){
+			YKIdleVar++;
+		}
+	}
 }
 
 void YKInitialize(void){
@@ -81,8 +87,8 @@ void YKNewTask(void (*task)(void), int *taskStack, unsigned char priority){
 	YKtaskCount++;
 	//insert into ready list 
 	YKinsertReady(tempTask);
-	//printStack(tempTask);
-	//printLists();
+	printStack(tempTask);
+	printLists();
 	if (YKRunFlag == 1){
 		YKScheduler(1);
 		YKExitMutex();
@@ -110,6 +116,7 @@ void YKDelayTask(unsigned count){
 		item->taskDelay = count;
 		YKremoveReady(item);
 		YKinsertBlocked(item);
+		printLists();
 		YKScheduler(1); 
 		YKExitMutex();
 	}
@@ -125,14 +132,14 @@ void YKExitISR(void){
 void YKEnterISR(void){
 	YKIsrDepth++;
 	if (YKIsrDepth == 1){
-		YKsave = YKRunningTask->taskSP;
+		YKsave = &(YKRunningTask->taskSP);
 		YKsaveSP();
 	}
 }
 
 void YKScheduler(int saveContext){
 	if (YKRunningTask != readyHead){
-		YKsave = YKRunningTask->taskSP;
+		YKsave = &(YKRunningTask->taskSP);
 		YKrestore = readyHead->taskSP;
 		YKRunningTask = readyHead;
 		YKCtxSwCount++;
@@ -143,18 +150,24 @@ void YKScheduler(int saveContext){
 //assuming tick isr is highest priority
 void YKTickHandler(void){
 	struct Task* temp;
+	struct Task* temp_next;
 	printString("TICK ");
 	printInt(YKTickCount);
 	printNewLine();
 	YKTickCount++;
 	temp = blockedHead;
+	printLists();
 	while(temp != NULL){
+		temp_next = temp->next;
 		(temp->taskDelay)--;
 		if (temp->taskDelay <= 0){
 			YKremoveBlocked(temp);
 			YKinsertReady(temp);
 		}
-		temp = temp->next;
+		if (temp_next != NULL){
+			temp = temp_next;
+		}
+		else break;
 	}
 }
 
