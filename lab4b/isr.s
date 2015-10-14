@@ -17,8 +17,7 @@ isr_keypress:
 	sti
 	call	YKkeypress
 	cli
-	mov	al, 0x20
-	out	0x20, al
+	call 	signalEOI ; tell the PIC that we're done with the ISR
 	call	YKExitISR	
 	pop	ax
 	pop	bx
@@ -44,8 +43,7 @@ isr_tick:
 	;sti tick should never be interrupted
 	call	YKTickHandler
 	;cli
-	mov	al, 0x20
-	out	0x20, al
+	call 	signalEOI ; tell the PIC that we're done with the ISR
 	call	YKExitISR	
 	pop	ax
 	pop	bx
