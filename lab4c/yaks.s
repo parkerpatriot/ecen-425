@@ -23,7 +23,8 @@ YKsavecontext:
 	push	cx
 	push	bx
 	push	ax
-	mov	[YKsave], sp
+	mov	bx, [YKsave]
+	mov	[bx], sp
 	jmp	YKrestorecontext
 YKDispatcher:
 	push	bp
@@ -46,11 +47,12 @@ YKrestorecontext:
 	pop	bp	
 	iret
 YKsaveSP:
-	push	bp
-	mov	bp, sp
+	push 	bp
+	mov 	bp, sp
 	add	sp, 8
-	mov	word [YKsave], sp  ;ISR saved context is two function calls away
+	mov 	bx, [YKsave]
+	mov 	[bx], sp
 	sub	sp, 8
-	mov	sp, bp
+	mov 	sp, bp
 	pop	bp
 	ret

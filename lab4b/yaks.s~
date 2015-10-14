@@ -46,11 +46,7 @@ YKrestorecontext:
 	pop	bp	
 	iret
 YKsaveSP:
-	push	bp
-	mov	bp, sp
-	add	sp, 8
+	add	sp, 6
 	mov	word [YKsave], sp  ;ISR saved context is two function calls away
-	sub	sp, 8
-	mov	sp, bp
-	pop	bp
+	sub	sp, 6
 	ret
