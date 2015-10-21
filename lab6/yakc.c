@@ -8,6 +8,9 @@
 int* YKsave;
 int* YKrestore;
 
+int next;
+int data;
+
 extern YKQ *MsgQPtr; 
 extern struct msg MsgArray[];
 extern int GlobalFlag;
@@ -46,7 +49,9 @@ void YKIdleTask(void){
 }
 
 YKQ *YKQCreate(void **start, unsigned size){
-	YKQ *qtemp = &YKqueues[YKqueueCount];
+	YKQ *qtemp;
+	YKEnterMutex();
+	qtemp = &YKqueues[YKqueueCount];
 	qtemp->nextEmpty = (int*)start;
 	qtemp->oldest = NULL;
 	qtemp->qSize = size;
@@ -55,6 +60,10 @@ YKQ *YKQCreate(void **start, unsigned size){
 	qtemp->qEnd = ((int*)start)+(size-1);
 	qtemp->qBlockedHead = NULL;
 	YKqueueCount++;
+	//printYKQ(qtemp);
+	if (YKRunFlag == 1){
+		YKExitMutex();
+	}
 	return qtemp;
 }
 
@@ -66,8 +75,6 @@ void *YKQPend(YKQ *queue){
 		item = YKpopSorted(&readyHead);
 		YKinsertSorted(item, &(queue->qBlockedHead));
 		YKScheduler(1); 
-		YKEnterMutex();	
-		//return NULL here or return the new message on the queue?
 	}
 	retMSG = (void*) *(queue->oldest);
 	(queue->oldest)++;
@@ -78,6 +85,8 @@ void *YKQPend(YKQ *queue){
 	else if ((queue->oldest) > (queue->qEnd)){
 		queue->oldest = queue->qStart;
 	}
+	//printString("Pend\n\r");
+	//printMsgQueue(queue);
 	YKExitMutex();
 	return (void*)retMSG;
 }
@@ -103,11 +112,14 @@ int YKQPost(YKQ *queue, void *msg){
 	if (YKIsrDepth == 0){	
 		YKScheduler(1);
 	}
+	//printString("Post\n\r");
+	//printMsgQueue(queue);
 	YKExitMutex();
 	return 1;
 }
 
 void printYKQ(YKQ *queue){
+	YKEnterMutex();
 	printString("Printing YKQ:\n\r");
 	printString("NextEmpty: "); 
 	printWord((int)queue->nextEmpty);
@@ -117,12 +129,18 @@ void printYKQ(YKQ *queue){
 	printInt(queue->qSize);
 	printString(", count: ");
 	printInt(queue->qCount);
+	printString(", qStart: "); 
+	printWord((int)queue->qStart);
+	printString(", qEnd: ");
+	printWord((int)queue->qEnd);
 	printNewLine();
+	YKExitMutex();
 }
 
 void printMsgQueue(YKQ *queue){
 	int *tempMsg;
 	int k;
+	YKEnterMutex();
 	printString("PrintingQueue:\n\r");
 	k = 0;
 	tempMsg = (int*)queue->oldest;
@@ -131,6 +149,8 @@ void printMsgQueue(YKQ *queue){
 			printString("[");
 			printWord((int) tempMsg);
 			printString("]: "); 
+			printInt((int)*tempMsg);
+			printString(": ");
 			printInt(*((int*)*tempMsg));
 			printString(", ");
 			tempMsg++;
@@ -140,10 +160,12 @@ void printMsgQueue(YKQ *queue){
 		}
 	printNewLine();
 	}
+	YKExitMutex();
 }
 
 YKSEM* YKSemCreate(int initialValue, char *string){
 	YKSEM *tempSem;
+	YKEnterMutex();
 	if (initialValue < 0){
 		return NULL;
 	}
@@ -152,6 +174,9 @@ YKSEM* YKSemCreate(int initialValue, char *string){
 	tempSem->pendHead = NULL;
 	tempSem->string = string;
 	YKsemCount++;
+	if (YKRunFlag == 1){
+		YKExitMutex();
+	}
 	return tempSem;
 }
 
@@ -172,6 +197,8 @@ void YKInitialize(void){
 	YKIsrDepth = 0;
 	YKsemCount = 0;
 	YKqueueCount = 0;
+	next = 0;
+	data = 0;
 	YKNewTask(&YKIdleTask, &YKIdleStk[IDLE_STACKSIZE], 100);
 }
 
@@ -296,13 +323,11 @@ void YKSemPost(YKSEM *semaphore){
 void YKTickHandler(void){
 	struct Task* temp;
 	struct Task* tempNext;
-	static int next;
-	static int data;
+	//static int next;
+	//static int data;
 	YKTickCount++;
 
 	/* create a message with tick (sequence #) and pseudo-random data */
-	next = 0;
-	data = 0;
 	MsgArray[next].tick = YKTickCount;
 	data = (data + 89) % 100;
 	MsgArray[next].data = data;
