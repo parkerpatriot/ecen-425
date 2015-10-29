@@ -18,9 +18,11 @@ extern int GlobalFlag;
 extern YKSEM *NSemPtr;
 
 extern int KeyBuffer;
+
 int YKqueueCount;
 int YKsemCount;
 int YKtaskCount;
+int YKeventCount;
 int YKRunFlag;
 int YKIsrDepth;
 volatile int YKIdleVar;
@@ -36,6 +38,7 @@ struct Task* YKRunningTask;
 YKSEM YKsemaphores[MAXSEM];
 struct Task YKtasks[MAXTASK];
 YKQ YKqueues[MAXQUEUES];
+YKEVENT YKevents[MAXEVENT];
 
 int YKIdleStk[IDLE_STACKSIZE];
 
@@ -46,6 +49,88 @@ void YKIdleTask(void){
 			YKIdleVar++;
 		}
 	}
+}
+
+YKEVENT *YKEventCreate(unsigned initialValue){
+	YKEVENT *etemp;
+	YKEnterMutex();
+	etemp = &YKevents[YKeventCount];
+	etemp->value = initialValue;
+	etemp->pendHead = NULL;
+	etemp->pendTail = NULL;
+	YKeventCount++;
+	if (YKRunFlag == 1){
+		YKExitMutex();
+	}
+	return etemp;	
+}
+
+unsigned YKEventPend(YKEVENT *event, unsigned eventMask, int waitMode){
+	unsigned tempMask;
+	struct Task* item;
+	YKEnterMutex();
+	tempMask = eventMask & (event->value);
+	if (waitMode == EVENT_WAIT_ANY){
+		if (tempMask > 0) {
+			YKExitMutex();
+			return event->value;
+		}
+	}
+	else {
+		if (tempMask == eventMask) {
+			YKExitMutex();
+			return event->value;
+		}
+	}
+
+	item = YKpopSorted(&readyHead);
+	if (item != NULL) {
+		YKinsertUnsorted(item, &(event->pendHead), &(event->pendTail));
+		item->eventWaitMode = waitMode;
+		item->eventMask = eventMask;
+		//printEvent(event);
+		YKScheduler(1);
+	}
+	YKExitMutex();
+	return event->value;	//volatile?
+}
+
+void YKEventSet(YKEVENT *event, unsigned eventMask){
+	struct Task* temp;
+	struct Task* tempNext;
+	YKEnterMutex();
+	//bug was here, set event value to eventMask	
+	event->value = event->value | eventMask;
+	temp = event->pendHead;
+	while (temp != NULL){
+		if (temp->eventWaitMode == EVENT_WAIT_ALL){
+			if (temp->eventMask != (temp->eventMask & event->value)){
+				temp = temp->next;			
+				continue;
+			}
+		}
+		else {
+			if ((temp->eventMask & event->value) == 0){
+				temp = temp->next;				
+				continue;
+			}
+		}
+		tempNext = temp->next;
+		YKremoveUnsorted(temp, &(event->pendHead), &(event->pendTail));
+		YKinsertSorted(temp, &readyHead);
+		temp = tempNext;
+	}
+	//printEvent(event);
+	if (YKIsrDepth == 0){	
+		YKScheduler(1);
+	}
+	YKExitMutex();
+}
+
+void YKEventReset(YKEVENT *event, unsigned eventMask){
+	YKEnterMutex();
+	event->value = (~eventMask & event->value);
+	YKExitMutex();
 }
 
 YKQ *YKQCreate(void **start, unsigned size){
@@ -193,6 +278,7 @@ void YKInitialize(void){
 	blockedHead = NULL;
 	blockedTail = NULL;
 	YKRunningTask = NULL;
+	YKeventCount = 0;
 	YKsemCount = 0;
 	YKIsrDepth = 0;
 	YKsemCount = 0;
@@ -227,6 +313,8 @@ void YKNewTask(void (*task)(void), int *taskStack, unsigned char priority){
 	tempTask->taskSP = tempSP+1;
 	tempTask->taskPriority = priority;
 	tempTask->taskDelay = 0;
+	tempTask->eventWaitMode = EVENT_WAIT_ANY;
+	tempTask->eventMask = 0;
 	
 	YKtaskCount++;
 	//insert into ready list 
@@ -259,7 +347,7 @@ void YKDelayTask(unsigned count){
 		item = YKRunningTask;
 		item->taskDelay = count;
 		YKpopSorted(&readyHead);
-		YKinsertBlocked(item);
+		YKinsertUnsorted(item, &blockedHead, &blockedTail);
 		YKScheduler(1); 
 		YKExitMutex();
 	}
@@ -327,7 +415,7 @@ void YKTickHandler(void){
 	//static int data;
 	YKTickCount++;
 
-	/* create a message with tick (sequence #) and pseudo-random data */
+	/* create a message with tick (sequence #) and pseudo-random data 
 	MsgArray[next].tick = YKTickCount;
 	data = (data + 89) % 100;
 	MsgArray[next].data = data;
@@ -335,13 +423,13 @@ void YKTickHandler(void){
 		printString("  TickISR: queue overflow! \n");
 	else if (++next >= MSGARRAYSIZE)
 		next = 0;
-
+	*/
 	temp = blockedHead;
 	while(temp != NULL){
 		tempNext = temp->next;
 		(temp->taskDelay)--;
 		if (temp->taskDelay <= 0){
-			YKremoveBlocked(temp);
+			YKremoveUnsorted(temp, &blockedHead, &blockedTail);
 			YKinsertSorted(temp, &readyHead);
 		}
 		if (tempNext != NULL){
@@ -352,7 +440,21 @@ void YKTickHandler(void){
 }
 
 void YKkeypress(void){
-	GlobalFlag = 1;
+    char c;
+    c = KeyBuffer;
+
+    if(c == 'a') YKEventSet(charEvent, EVENT_A_KEY);
+    else if(c == 'b') YKEventSet(charEvent, EVENT_B_KEY);
+    else if(c == 'c') YKEventSet(charEvent, EVENT_C_KEY);
+    else if(c == 'd') YKEventSet(charEvent, EVENT_A_KEY | EVENT_B_KEY | EVENT_C_KEY);
+    else if(c == '1') YKEventSet(numEvent, EVENT_1_KEY);
+    else if(c == '2') YKEventSet(numEvent, EVENT_2_KEY);
+    else if(c == '3') YKEventSet(numEvent, EVENT_3_KEY);
+    else {
+        print("\nKEYPRESS (", 11);
+        printChar(c);
+        print(") IGNORED\n", 10);
+    }
 }
 
 void YKinsertSorted(struct Task* item, struct Task** listHead){
@@ -404,35 +506,36 @@ struct Task* YKpopSorted (struct Task** listHead){
 	}
 }
 
-void YKremoveBlocked (struct Task* item){
+void YKremoveUnsorted (struct Task* item, struct Task** listHead, struct Task** listTail){
 	if (item != NULL) {
 
 		if (item->prev != NULL) {
 			(item->prev)->next = item->next;
 		}
 		else {
-			blockedHead = item->next;
+			*listHead = item->next;
 		}
 		if (item->next != NULL) {
 			(item->next)->prev = item->prev;
 		}
 		else {
-			blockedTail = item->prev;
+			*listTail = item->prev;
 		}
 	}
 }
-void YKinsertBlocked(struct Task* item){
+
+void YKinsertUnsorted(struct Task* item, struct Task** listHead, struct Task** listTail){
 	if (item != NULL) {
-		if (blockedTail == NULL){
-			blockedHead = item;
-			blockedTail = item;
+		if (*listTail == NULL){
+			*listHead = item;
+			*listTail = item;
 			item->next = NULL;
 			item->prev = NULL;
 		}
 		else {
-			blockedTail->next = item;
-			item->prev = blockedTail;
-			blockedTail = item;
+			(*listTail)->next = item;
+			item->prev = *listTail;
+			*listTail = item;
 			item->next = NULL;
 		}
 	}
@@ -483,32 +586,30 @@ void printStack(struct Task* item){
 	}	
 }
 
-void printLists(void){
+void printList(struct Task* listHead, char *string){
 	struct Task* temp;
-	printString("\n\rReady List:\n\r");
-	temp = readyHead;
+	printNewLine();
+	printString(string);
+	printNewLine();
+	temp = listHead;
 	while(temp != NULL){
 		printString("[0x");
 		printByte(temp->taskPriority);
 		printString(", ");
 		printWord(temp->taskDelay);
+		printString(", 0x");
+		printWord(temp->eventMask);
 		printString(", ");
-		printWord((int)temp->taskSP);
+		printInt(temp->eventWaitMode);
 		printString("] ");
 		temp = temp->next;
 	}
 	printNewLine();
-	temp = blockedHead;
-	printString("Blocked List:\n\r");
-	while(temp != NULL){
-		printString("[0x");
-		printByte(temp->taskPriority);
-		printString(", ");
-		printWord(temp->taskDelay);
-		printString(", ");
-		printWord((int)temp->taskSP);
-		printString("] ");
-		temp = temp->next;
-	}
-	printString("\n\r");
+}
+
+void printEvent(YKEVENT *event){
+	printString("Printing Event:\n\r");
+	printString("Value: 0x");
+	printWord(event->value);
+	printList(event->pendHead, "EventList:");
 }
