@@ -1,41 +1,66 @@
 #include "clib.h"
 #include "yakk.h"
 #include "yaku.h"
+#include "lab6defs.h"
+
+#define LAB5
+// #define DEBUG
 
 #define INTERRUPTS_ENABLED	0x0200
 
 int* YKsave;
 int* YKrestore;
 
+/////////// externs from user code /////////////
+
 extern int KeyBuffer; 	// clib key buffer
-extern YKSEM *NSemPtr; 	// for Lab 5 application
+
+#ifdef LAB5
+	extern YKSEM *NSemPtr; 	// for Lab 5 application
+#endif
+
+#ifdef LAB6
+	extern int GlobalFlag;
+	extern YKQ *MsgQPtr; 
+	extern struct msg MsgArray[];
+	static int next = 0;
+	static int data = 0;
+#endif
+
+/////////////////// YK Vars ////////////////////
 
 int YKtaskCount; 	// how many tasks initialized
 int YKRunFlag;		// are we running?
 int YKIsrDepth;		// ISR nesting counter
-
+int YKSemCount;
+int YKQCount;
 volatile int YKIdleVar; 
 unsigned int YKTickCount;
 unsigned int YKCtxSwCount;
 unsigned int YKIdleCount;
+
+////////////// TASK POINTERS /////////////////
 
 struct Task* readyHead;
 struct Task* readyTail;
 struct Task* blockedHead;
 struct Task* blockedTail;
 struct Task* YKRunningTask;
-
 struct Task* pendHead;
 struct Task* pendTail;
 
+//////// PREALLOCATED MEMORY BLOCKS ////////
+
 struct Task YKTasks[TASKNUM];
-
 int YKIdleStk[STACKSIZE];
-
-// semaphor stuff
 YKSEM YKSemaphors[MAXSEM];
+YKQ YKQueues[MAXQ];
 
-volatile unsigned int semCount;
+
+
+//////////////// YAK METHODS ///////////////////
+
+
 
 void YKIdleTask(void){
 	while(1){
@@ -61,7 +86,7 @@ void YKInitialize(void){
 	blockedTail = NULL;
 	YKRunningTask = NULL;
 	YKIsrDepth = 0;
-	semCount = 0;
+	YKSemCount = 0;
 	YKNewTask(&YKIdleTask, &YKIdleStk[IDLE_STACKSIZE], 100);
 }
 
@@ -95,8 +120,10 @@ void YKNewTask(void (*task)(void), int *taskStack, unsigned char priority){
 	YKtaskCount++;
 	//insert into ready list 
 	YKInsertSorted(tempTask, &readyHead);
-	printStack(tempTask);
-	printLists();
+	#ifdef DEBUG
+		printStack(tempTask);
+		printLists();
+	#endif
 	if (YKRunFlag == 1){
 		YKScheduler(1);
 		YKExitMutex();
@@ -126,7 +153,9 @@ void YKDelayTask(unsigned count){
 		item->taskDelay = count;
 		YKRemoveSorted(item, &readyHead);
 		YKInsertBlocked(item);
-		//printLists();
+		#ifdef DEBUG
+			printLists();
+		#endif
 		YKScheduler(1); 
 		YKExitMutex();
 	}
@@ -163,10 +192,26 @@ void YKScheduler(int saveContext){
 void YKTickHandler(void){
 	struct Task* temp;
 	struct Task* temp_next;
-	printString("TICK ");
-	printInt(YKTickCount);
-	printString("\n\r\n\r");
+	#ifndef LAB6
+		printString("TICK ");
+		printInt(YKTickCount);
+		printString("\n\r\n\r");
+	#endif
 	YKTickCount++;
+
+	////////////////// LAB 6 CODE ///////////////////
+	#ifdef LAB6
+	    /* create a message with tick (sequence #) and pseudo-random data */
+	    MsgArray[next].tick = YKTickCount;
+	    data = (data + 89) % 100;
+	    MsgArray[next].data = data;
+	    if (YKQPost(MsgQPtr, (void *) &(MsgArray[next])) == 0)
+		printString("  TickISR: queue overflow! \n");
+	    else if (++next >= MSGARRAYSIZE)
+			next = 0;
+	#endif
+	////////////// END OF LAB 6 CODE //////////////
+	
 	temp = blockedHead;
 	//printLists();
 	while(temp != NULL){
@@ -184,29 +229,40 @@ void YKTickHandler(void){
 }
 
 void YKKeypressHandler(void){
-	int k = 0;
-	int m = 0;
-	if (KeyBuffer=='d'){
-		printNewLine();
-		printString("DELAY KEY PRESSED");
-		printNewLine();
-		for (k=0; k<=5000; k++){
-			m++;		
-		}
-		printString("DELAY COMPLETE");
-		printNewLine();		
-	}	
-	else if(KeyBuffer=='p'){
-		YKSemPost(NSemPtr);
-	}
+	#ifdef LAB6
+		GlobalFlag = 1;
+	#endif
 
-	else {
-		 printNewLine();
-		 printString("KEYPRESS (");
-		 printChar(KeyBuffer);
-		 printString(") IGNORED");
-		 printNewLine();
-	}
+	#ifndef LAB6
+		int k = 0;
+		int m = 0;
+		if (KeyBuffer=='d'){
+			printNewLine();
+			printString("DELAY KEY PRESSED");
+			printNewLine();
+			for (k=0; k<=5000; k++){
+				m++;		
+			}
+			printString("DELAY COMPLETE");
+			printNewLine();		
+		}
+
+		///////////// LAB 5 CODE ////////////
+		#ifdef LAB5
+		else if(KeyBuffer=='p'){
+			YKSemPost(NSemPtr);
+		}
+		#endif
+		///////// END OF LAB 5 CODE ////////
+
+		else {
+			 printNewLine();
+			 printString("KEYPRESS (");
+			 printChar(KeyBuffer);
+			 printString(") IGNORED");
+			 printNewLine();
+		}
+	#endif
 }
 
 void YKResetHandler(){
@@ -225,11 +281,11 @@ YKSEM* YKSemCreate(int val){
 	else{
 		// printString("Creating semaphor!\n\r");
 	}
-	sem = &YKSemaphors[semCount];
+	sem = &YKSemaphors[YKSemCount];
 	sem->value = val;
 	sem->pendHead = NULL;
 	sem->string = NULL;
-	semCount++;
+	YKSemCount++;
 	return sem;
 }
 
@@ -265,6 +321,83 @@ void YKSemPost(YKSEM* sem){
 		return;
 	}
 }
+
+///////////////////// QUEUE CODE /////////////////////////
+
+
+YKQ *YKQCreate(void **start, unsigned int size){
+	YKQ *tempQ;
+	YKEnterMutex();
+	tempQ = &YKQueues[YKQCount];
+	tempQ->size = size;
+	tempQ->count = 0;
+	tempQ->start = (int*)start;
+	tempQ->end = ((int*)start) + (size-1);
+	tempQ->head = (int*)start;
+	tempQ->next = (int*)start;
+	tempQ->blockedHead = NULL;
+	YKQCount++;
+	if(YKRunFlag==1){
+		YKExitMutex();
+	}
+	#ifdef DEUBG
+		printYKQ(tempQ);
+	#endif
+	return tempQ;
+}
+
+void* YKQPend(YKQ *queue){
+	void* tmpMsg;
+	struct Task* tmpTask;
+	YKEnterMutex();
+	if (queue->count == 0){
+		tmpTask = readyHead;
+		YKRemoveSorted(tmpTask, &readyHead);
+		YKInsertSorted(tmpTask, &(queue->blockedHead));
+		YKScheduler(1);
+	}
+	(queue->count)--;
+	tmpMsg = (void*) *(queue->head);
+	if (++(queue->head) > queue->end){
+		queue->head = queue->start;
+	}
+	#ifdef DEBUG
+		printString("Pend!\n");
+		printMsgQueue(queue);
+	#endif
+	YKExitMutex();
+	return tmpMsg;
+}
+
+int YKQPost(YKQ *queue, void *msg){
+	struct Task* tmpTask;
+	YKEnterMutex();
+	if(queue->size == queue->count){
+		YKExitMutex();
+		return 0;
+	}
+	(queue->count)++;
+	*(queue->next) = (int) msg;
+	if (++(queue->next) > queue->end){
+		queue->next = queue->start;
+	}
+
+	if(queue->blockedHead != NULL){
+		tmpTask = queue->blockedHead;
+		YKRemoveSorted(tmpTask, &(queue->blockedHead));
+		YKInsertSorted(tmpTask, &readyHead);
+		if (YKIsrDepth==0){
+			YKScheduler(1);
+		}
+	}
+	#ifdef DEBUG
+		printString("POST!\n");
+		printMsgQueue(queue);
+	#endif
+	YKExitMutex();
+	return 1;
+}
+
 
 //////////////////// LIST MANGERS ////////////////////////
 
@@ -417,4 +550,49 @@ void printLists(void){
 		temp = temp->next;
 	}
 	printString("\n\r");
+}
+
+void printYKQ(YKQ *queue){
+	// YKEnterMutex();
+	printString("Printing YKQ:\n\r");
+	printString("NextEmpty: "); 
+	printWord((int)queue->next);
+	printString(", head: ");
+	printWord((int)queue->head);
+	printString(", size: ");
+	printInt(queue->size);
+	printString(", count: ");
+	printInt(queue->count);
+	printString(", qStart: "); 
+	printWord((int)queue->start);
+	printString(", qEnd: ");
+	printWord((int)queue->end);
+	printNewLine();
+	// YKExitMutex();
+}
+
+void printMsgQueue(YKQ *queue){
+	int *tempMsg;
+	int k;
+	YKEnterMutex();
+	printString("PrintingQueue:\n\r");
+	k = 0;
+	tempMsg = (int*)queue->head;
+	if (tempMsg != NULL) {
+		for (k; k < (queue->count); k++){
+			printString("[");
+			printWord((int) tempMsg);
+			printString("]: "); 
+			printInt((int)*tempMsg);
+			printString(": ");
+			printInt(*((int*)*tempMsg));
+			printString(", ");
+			tempMsg++;
+			if (((int*) tempMsg) > (queue->end)){
+				tempMsg = queue->start;
+			}
+		}
+	printNewLine();
+	}
+	YKExitMutex();
 }

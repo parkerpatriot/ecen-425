@@ -1,4 +1,7 @@
 
+#ifndef YAKK_H_   /* Include guard */
+#define YAKK_H_
+
 #define NULL 0
 #define IDLE_STACKSIZE 256
 
@@ -16,9 +19,30 @@ typedef struct{
 	struct Task* pendHead;
 } YKSEM;
 
+typedef struct{
+	unsigned int size;
+	unsigned int count;
+	int *start;
+	int *end;
+	int *head;
+	int *next;
+	struct Task* blockedHead;
+} YKQ;
+
 extern unsigned int YKTickCount;
 extern unsigned int YKCtxSwCount;
 extern unsigned int YKIdleCount;
+
+YKQ* YKQCreate(void **start, unsigned int size);
+
+void* YKQPend(YKQ *queue);
+
+int YKQPost(YKQ *queue, void *msg);
+
+void printYKQ(YKQ *queue);
+
+void printMsgQueue(YKQ *queue);
+
 
 YKSEM* YKSemCreate(int value);
 
@@ -65,3 +89,4 @@ void printStack(struct Task* item);
 void printLists(void);
 
 
+#endif // YAKK_H_

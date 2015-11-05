@@ -4,14 +4,9 @@ YKEnterMutex:
 YKExitMutex:
 	sti
 	ret
-YKSavecontext:
+YKSaveContext:
+	cli
 	pushf
-	push	bx
-	add		sp, 2
-	mov		bx, sp
-	or		word[bx], 0x0200
-	sub		sp, 2
-	pop		bx
 	push	cs
 	push	word[bp+2]
 	push	word[bp]
@@ -33,7 +28,7 @@ YKDispatcher:
 	mov		ax, [bp+4] 	; get arg
 	cmp		ax, 1		;save context?
 	pop		ax
-	je		YKSavecontext
+	je		YKSaveContext
 YKRestoreContext:
 	mov		sp, [YKrestore]
 	pop		ax
