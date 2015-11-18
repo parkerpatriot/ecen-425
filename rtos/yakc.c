@@ -3,7 +3,7 @@
 #include "yaku.h"
 #include "lab6defs.h"
 
-#define LAB5
+#define LAB7
 // #define DEBUG
 
 #define INTERRUPTS_ENABLED	0x0200
@@ -34,6 +34,7 @@ int YKRunFlag;		// are we running?
 int YKIsrDepth;		// ISR nesting counter
 int YKSemCount;
 int YKQCount;
+int YKEventCount;
 volatile int YKIdleVar; 
 unsigned int YKTickCount;
 unsigned int YKCtxSwCount;
@@ -55,6 +56,93 @@ struct Task YKTasks[TASKNUM];
 int YKIdleStk[STACKSIZE];
 YKSEM YKSemaphors[MAXSEM];
 YKQ YKQueues[MAXQ];
+YKEVENT YKEvents[MAXEVENTS];
+
+void printEventPendingTasks(YKEVENT* event);
+
+
+////////////////// EVENTS /////////////////////
+
+
+YKEVENT* YKEventCreate(unsigned init_val){
+	YKEVENT* tempEvent;
+	tempEvent = &YKEvents[YKEventCount];
+	tempEvent->allEvents = init_val;
+	tempEvent->blockedHead = NULL;
+	YKEventCount++;
+	return tempEvent;
+}
+
+unsigned YKEventPend(YKEVENT *event, unsigned eventMask, int waitMode) {
+	YKEnterMutex();
+	// printString("pending on event...\n\r");
+	if(!eventMask | event==NULL){
+		printString("Error! No events specified!\n\r");
+		YKExitMutex();
+		return 0;
+	}
+	else{
+		YKRunningTask->waitMode = waitMode;
+		YKRunningTask->eventPend = eventMask;
+		YKRemoveSorted(YKRunningTask, &readyHead);
+		YKInsertSorted(YKRunningTask, &(event->blockedHead));
+		YKScheduler(1);
+		YKExitMutex();
+		return event->allEvents;
+	}
+}
+
+void YKEventSet(YKEVENT *event, unsigned eventMask) {
+	struct Task* tempTask;
+	struct Task* nextTask;
+	int callScheduler;
+	unsigned result;
+	// callScheduler = 0;
+	YKEnterMutex();
+	// printString("posting....\n\r");
+	if(!eventMask | event==NULL){
+		printString("Error no events specified!\n\r");
+		YKExitMutex();
+	}
+	else{
+		event->allEvents = event->allEvents | eventMask;
+		if(event->blockedHead != NULL){
+			tempTask = event->blockedHead;
+			do{
+				nextTask = tempTask->next;
+				if (tempTask->waitMode==EVENT_WAIT_ANY){
+					result = tempTask->eventPend & event->allEvents;
+					if(result){
+						YKRemoveSorted(tempTask, &(event->blockedHead));
+						YKInsertSorted(tempTask, &readyHead);
+						// callScheduler = 1;
+					}
+				}
+				else if(tempTask->waitMode==EVENT_WAIT_ALL){
+					result = tempTask->eventPend & event->allEvents;
+					if(result == tempTask->eventPend){
+						YKRemoveSorted(tempTask, &(event->blockedHead));
+						YKInsertSorted(tempTask, &readyHead);
+						// callScheduler = 1;
+					}
+				}
+				tempTask = nextTask;
+			} while(nextTask != NULL);
+			if (/*callScheduler && */YKIsrDepth==0){
+				YKScheduler(1);
+			}
+		}
+	}
+	YKExitMutex();
+}
+
+void YKEventReset(YKEVENT *event, unsigned eventMask){
+	event->allEvents &= (~eventMask);
+}
+
+
+
+
 
 
 
@@ -192,7 +280,7 @@ void YKScheduler(int saveContext){
 void YKTickHandler(void){
 	struct Task* temp;
 	struct Task* temp_next;
-	#ifndef LAB6
+	#if !defined(LAB6) && !defined(LAB7)
 		printString("TICK ");
 		printInt(YKTickCount);
 		printString("\n\r\n\r");
@@ -231,12 +319,26 @@ void YKTickHandler(void){
 void YKKeypressHandler(void){
 	#ifdef LAB6
 		GlobalFlag = 1;
-	#endif
 
-	#ifndef LAB6
+	#elif defined(LAB7)
+		#include "lab7defs.h"
+		if(KeyBuffer == 'a') YKEventSet(charEvent, EVENT_A_KEY);
+	    else if(KeyBuffer == 'b') YKEventSet(charEvent, EVENT_B_KEY);
+	    else if(KeyBuffer == 'c') YKEventSet(charEvent, EVENT_C_KEY);
+	    else if(KeyBuffer == 'd') YKEventSet(charEvent, EVENT_A_KEY | EVENT_B_KEY | EVENT_C_KEY);
+	    else if(KeyBuffer == '1') YKEventSet(numEvent, EVENT_1_KEY);
+	    else if(KeyBuffer == '2') YKEventSet(numEvent, EVENT_2_KEY);
+	    else if(KeyBuffer == '3') YKEventSet(numEvent, EVENT_3_KEY);
+	    else {
+	        print("\nKEYPRESS (", 11);
+	        printChar(KeyBuffer);
+	        print(") IGNORED\n", 10);
+	    }
+
+	#else
 		int k = 0;
 		int m = 0;
-		if (KeyBuffer=='d'){
+		if (=='d'){
 			printNewLine();
 			printString("DELAY KEY PRESSED");
 			printNewLine();
@@ -291,7 +393,7 @@ YKSEM* YKSemCreate(int val){
 
 void YKSemPend(YKSEM* sem){
 	YKEnterMutex();
-	// printString("pedingin...\n\r");
+	// printString("pending...\n\r");
 	if((sem->value)-- > 0){
 		YKExitMutex();
 		return;
@@ -594,5 +696,28 @@ void printMsgQueue(YKQ *queue){
 		}
 	printNewLine();
 	}
+	YKExitMutex();
+}
+
+
+void printEventPendingTasks(YKEVENT *event){
+	struct Task* tempTask;
+	struct Task* nextTask;
+	YKEnterMutex();
+	printString("Printing Event-blocked Tasks:\n\r");
+	tempTask = event->blockedHead;
+	if(tempTask == NULL) return;
+	do {
+		nextTask = tempTask->next;
+		printString("[0x");
+		printByte(tempTask->taskPriority);
+		printString(", ");
+		printWord(tempTask->taskDelay);
+		printString(", ");
+		printWord((int)tempTask->taskSP);
+		printString("] ");
+		tempTask = nextTask;
+		} while(nextTask!=NULL);
+	printNewLine();
 	YKExitMutex();
 }

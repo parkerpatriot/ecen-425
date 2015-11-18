@@ -5,12 +5,17 @@
 #define NULL 0
 #define IDLE_STACKSIZE 256
 
+#define EVENT_WAIT_ANY	1
+#define EVENT_WAIT_ALL 	2
+
 struct Task{
 	int *taskSP;
 	unsigned char taskPriority;
 	unsigned int taskDelay;
 	struct Task* next;
 	struct Task* prev;
+	int eventPend;
+	int waitMode;
 };
 
 typedef struct{
@@ -29,9 +34,22 @@ typedef struct{
 	struct Task* blockedHead;
 } YKQ;
 
+typedef struct{
+	unsigned allEvents;
+	struct Task* blockedHead;
+} YKEVENT;
+
 extern unsigned int YKTickCount;
 extern unsigned int YKCtxSwCount;
 extern unsigned int YKIdleCount;
+
+YKEVENT* YKEventCreate(unsigned init_val);
+
+unsigned YKEventPend(YKEVENT *event, unsigned eventMask, int waitMode);
+
+void YKEventSet(YKEVENT *event, unsigned eventMask);
+
+void YKEventReset(YKEVENT *event, unsigned eventMask);
 
 YKQ* YKQCreate(void **start, unsigned int size);
 

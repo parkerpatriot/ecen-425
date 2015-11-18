@@ -5,6 +5,7 @@
 #define MAXSEM		10
 #define TASKNUM		4
 #define MAXQ		2
+#define MAXEVENTS	3
 
 #endif
 

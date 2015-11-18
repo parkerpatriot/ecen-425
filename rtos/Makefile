@@ -15,7 +15,7 @@ $(LAB)_app.s:	$(LAB)_app.c yakk.h yaku.h clib.h
 clean:
 		rm *.bin *.lst *final.s yakc.s *_app.s yakc.i *_app.i
 
-.PHONY: export
-export:
-	export PATH=$$PATH:/ee2/ee525/bin
+# .PHONY: export
+# export:
+# 	export PATH=$$PATH:/ee2/ee525/bin
 
